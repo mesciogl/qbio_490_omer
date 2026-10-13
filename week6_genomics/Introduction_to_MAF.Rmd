@@ -18,34 +18,92 @@ In this assignment, you will need to use your skills learned in class to demonst
 *Pre-Assignment*
 Load all necessary packages, read in the clinical data.csv file you have in your analysis_data folder, and instantiate the MAF_object.
 ```{r}
+library(maftools)
+library(TCGAbiolinks)
+library(ggplot2)
 
+  #TODO: fill in file path to analysis_data 
+    knitr::opts_knit$set(root.dir = normalizePath("/home1/mesciogl/490_cluster/analysis_data")) 
+
+  
+  
+  maf_query <- GDCquery(
+  project = "TCGA-BRCA",
+  data.category = "Simple Nucleotide Variation",
+  access = "open",
+  data.type = "Masked Somatic Mutation",
+  workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+  
+  GDCdownload(maf_query, method = "api", files.per.chunk = 100)
+
+  maf <- GDCprepare(maf_query)
+
+  maf_object <- read.maf(maf = maf,
+                       clinicalData = clinical,
+                       isTCGA = TRUE)
+  
+  clinical <- read.csv("/home1/mesciogl/490_cluster/analysis_data/brca_clinical_data.csv")
+  # or
+  clinical <- maf_object@clinical.data
 ```
 
 It's useful to save your MAF_object, so that you don't have to go through the trouble of querying and preparing it everytime. The saveRDS function allows us to save an R object, allowing us to access it directly from our files. 
 ```{r}
-saveRDS(fill in with name of your MAF_object, file = "/path/to/analysis_data/maf_object.rds")
-# ex. saveRDS(MAF_object, file = "/home1/yourname/490_cluster/analysis_data/maf_object.rds")
+saveRDS(maf_object, file = "home1/mesciogl/490_cluster/analysis_data/maf_object.rds")
 ```
 
 When you reopen a new R session and want to access your MAF_object, you can use the readRDS function to load the object back into a new variable.
 ```{r}
 MAF_object <- readRDS(file = "/path/to/analysis_data/maf_object.rds")
 # ex. MAF_object <- readRDS(file = "/home1/yourname/490_cluster/analysis_data/maf_object.rds")
+
+library(maftools)
+maf_object <- readRDS("/home1/mesciogl/490_cluster/analysis_data/maf_object.rds")
+# or, if you only saved maf:
+maf <- readRDS("/home1/mesciogl/490_cluster/analysis_data/maf_prepared.rds")
+clinical <- readRDS("/home1/mesciogl/490_cluster/analysis_data/clinical_with_barcode.rds")
+maf_object <- read.maf(maf = maf, clinicalData = clinical, isTCGA = TRUE)
 ```
 
 *1*
 Choose a clinical variable (or any variable from clin_rad or clin_drug) to separate your populations into two different groups and rewrite the column or create a new column with that variable as a factor. ***Do not use age or vital_status as your clinical variable.*** Hint: if your variable is continuous, you will need to determine your own cutoffs for the different levels of the factor. If your variable is categorical and has more than two possible values, choose the two that are the most common.
 ```{r}
+unique(clinical$ajcc_metastasis_pathologic_pm)
 
+
+metastatic_mask     <- clinical$ajcc_metastasis_pathologic_pm == "M1"
+non_metastatic_mask <- clinical$ajcc_metastasis_pathologic_pm %in% c("M0", "cM0 (i+)")
+
+metastatic_barcodes     <- clinical$Tumor_Sample_Barcode[metastatic_mask %in% TRUE]
+non_metastatic_barcodes <- clinical$Tumor_Sample_Barcode[non_metastatic_mask %in% TRUE]
+
+metastatic_maf     <- subsetMaf(maf = maf_object, tsb = metastatic_barcodes)
+non_metastatic_maf <- subsetMaf(maf = maf_object, tsb = non_metastatic_barcodes)
 ```
 
 
 *2*
 Create a co-oncoplot with the top 10-20 (you choose) most mutated genes for the two groups. Pick one that has a large discrepancy in % mutated or type of mutations between the groups and research it. 
 Research it. What is the gene used for? Can you think of any reason for the discrepancy?
-```{r}
+```{r, fig.width=30, fig.height = 12}
 
+top_genes <- getGeneSummary(maf_object)$Hugo_Symbol[1:15]
+
+graphics.off()
+pdf("/home1/mesciogl/490_cluster/coOncoplot_metastatic_vs_nonmetastatic.pdf", width = 50, height = 4)
+coOncoplot(m1 = metastatic_maf, m2 = non_metastatic_maf,
+           m1Name = "Metastatic", m2Name = "Non-metastatic",
+           genes = top_genes, borderCol = NA,
+           outer_mar = 2, gene_mar = 3, barcode_mar = 1,
+           geneNamefont = 0.8, legendFontSize = 0.8, titleFontSize = 1)
+
+dev.off()
 ```
+
+PIK3CA gene mutation is one that has a reliably large discrepancy among the metastatic vs. non-metastatic patients. When searching up this gene online, it encodes for a part of the enzyme that produces PI3K, a master cell cycle regulator to regulate cell growth, proliferation, and division. These processes are 
+inherent to tumor biology and could be a starting point for understanding why these metastatic cancers
+are also more aggressively dividing. 
 
 
 *3*
@@ -53,20 +111,76 @@ Create a contingency table with your variable and chosen gene. Run a Fisher’s 
 Interpret the output of the Fisher’s Exact Test in terms of the odds ratio and p-value.
 ```{r}
 
-```
+clinical$metastasis_status <- factor(
+  ifelse(clinical$ajcc_metastasis_pathologic_pm == "M1", "Metastatic",
+         ifelse(clinical$ajcc_metastasis_pathologic_pm %in% c("M0", "cM0 (i+)"), "Non-metastatic", NA)),
+  levels = c("Metastatic", "Non-metastatic"))
 
+# Patients with at least one PIK3CA mutation
+pik3ca_barcodes <- unique(maf_object@data$Tumor_Sample_Barcode[maf_object@data$Hugo_Symbol == "PIK3CA"])
+
+clinical$PIK3CA_status <- factor(
+  ifelse(clinical$Tumor_Sample_Barcode %in% pik3ca_barcodes, "Mutated", "Not mutated"),
+  levels = c("Mutated", "Not mutated"))
+
+# Keep only patients who have mutation data and a metastasis label
+sequenced <- getSampleSummary(maf_object)$Tumor_Sample_Barcode
+clin_sub  <- clinical[clinical$Tumor_Sample_Barcode %in% sequenced & !is.na(clinical$metastasis_status), ]
+
+# Contingency table
+contingency_table <- table(clin_sub$metastasis_status, clin_sub$PIK3CA_status)
+contingency_table
+
+fisher_test <- fisher.test(contingency_table)
+fisher_test
+
+png("/home1/mesciogl/490_cluster/mosaic_PIK3CA_metastasis.png", width = 1200, height = 1000, res = 150)
+mosaicplot(contingency_table, main = "PIK3CA mutation by metastatic status",
+           xlab = "Metastatic status", ylab = "PIK3CA", color = c("firebrick", "grey80"))
+dev.off()
+
+```
+The odds ratio is 0.98 at a p-value of 1. This strongly suggests that PI3KCA is not significantly mutated among metastatic vs. non-metastatic patients. 
 
 *4*
 Subset your maf_object based on your chosen clinical variable and create a co-lollipop plot of your chosen gene divided between the two different clinical variable possibilities. Include descriptive names on your plot.
 Do you notice any difference in terms of mutations (e.g. sites, types, number) between the two populations?
 ```{r}
-
+lollipopPlot2(m1 = metastatic_maf,
+m2 = non_metastatic_maf,
+m1_name = "metastatic",
+m2_name = "non-metastatic",
+gene = "PIK3CA")
 ```
-
+PI3KCA is mutated at almost identical rates among the metastatic vs. non-metastatic groups (33.33% vs 33.74%). The co-lollipop plot shows that these mutations occur at roughly the same positions in the gene domains , with mutations clustering at PI3Ka_I and near the terminal chain of the amino acid. Almost all of these mutations are missense, with a notable in frame deletion occurring early on among non-metastatic patients near PI3K_p85B. 
 
 *5*
 Create your Overall_Survival_Status column and create a mafSurvival KM plot based on mutations in your chosen gene.
 Does there seem to be a difference? Hypothesize why or not based on the other analysis you did with the gene above.
 ```{r}
+clinical <- maf_object@clinical.data
 
+clinical$death_days_to        <- suppressWarnings(as.numeric(clinical$death_days_to))
+clinical$last_contact_days_to <- suppressWarnings(as.numeric(clinical$last_contact_days_to))
+
+clinical$survival_time <- ifelse(!is.na(clinical$death_days_to),
+                                 clinical$death_days_to,
+                                 clinical$last_contact_days_to)
+clinical$Overall_Survival_Status <- clinical$vital_status == "Dead"
+
+maf_object@clinical.data <- clinical         
+
+"survival_time" %in% colnames(maf_object@clinical.data)   # should print TRUE
+
+
+png("/home1/mesciogl/490_cluster/KM_PIK3CA_survival.png", width = 1400, height = 1000, res = 150)
+mafSurvival(maf = maf_object,
+            genes = "PIK3CA",
+            time = "survival_time",
+            Status = "Overall_Survival_Status",
+            isTCGA = TRUE)
+dev.off()
 ```
+There does not seem to be a significant difference in survival rate (p = 0.586) among patients with the gene mutation vs. patients who don't. This is consistent with our previous figures generated,
+which showed that mutations occurred in similar locations througout the length of the gene for both metastatic vs. non-metastatic patients,
+indicating that one component of tumor severity (metastasis) does not significantly differ, at least in terms of where and how the mutations are affecting the gene. Additionally, fisher exact table confirmed that there is no significant association between Death status and Mutation burden, as showed by the p-value = 1 and OR. = 0.98. This Kaplan Meier plot of survival across time not significantly differing aong mutants vs. controls is the final confirmation that this gene may not be significantly intertwined with tumor severity or prognosis. 

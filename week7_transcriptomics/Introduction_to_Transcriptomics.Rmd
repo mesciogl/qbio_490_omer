@@ -24,7 +24,7 @@ Set your working directory
 (run getwd() in the console -- the small window below the main script area -- to check that the working directory is analysis_data)
 (if getwd() prints the wrong directory, run setwd("PATH TO anaylysis_data"))
 ```{r setup}
-      knitr::opts_knit$set(root.dir = normalizePath("PATH TO analysis_data")) 
+      knitr::opts_knit$set(root.dir = normalizePath("/home1/mesciogl/490_cluster/analysis_data")) 
 ```
 
 Download and load packages
@@ -74,14 +74,14 @@ dim(rna_se@assays@data$unstranded)
 
 Fill out a description of the rows/columns of our data frames. You can use this as a cheat sheet moving forward.
   ~ colData
-        - Rows: [Fill In]
-        - Columns: [Fill In]
+        - Rows: [1231]
+        - Columns: [94]
   ~ rowRanges@elementMetadata
-        - Rows: [Fill In]
-        - Columns: [Fill In]
+        - Rows: [60660]
+        - Columns: [10]
   ~ unstranded (in assays)
-        - Rows: [Fill In]
-        - Columns: [Fill In]
+        - Rows: [60660]
+        - Columns: [1231]
   
 ```{r Exercise 1.3}
 # colData: 
@@ -93,12 +93,14 @@ rownames(rna_se@rowRanges@elementMetadata)
 colnames(rna_se@rowRanges@elementMetadata)
 
 # what are the rows...?
+# Each row is a gene, and each column carries information on each gene
 
 # unstranded: 
 rownames(rna_se@assays@data$unstranded)
 colnames(rna_se@assays@data$unstranded)
 
 # what are these?
+# Each row is a person/patient, and each column carries clinical information on each patient.
 # Hint: Do the rows/cols match dimensions of other dataframes?
 
 ```
@@ -114,13 +116,13 @@ rna_se@colData$age_at_index[1:15]
 ```
 
 Call the *summary()* function on the *age_at_index* column. Record the output below:
-    Min.: 
-    1st Qu.: 
-    Median: 
-    Mean: 
-    3rd Qu.: 
-    Max.: 
-    NA's: 
+    Min.: 26
+    1st Qu.: 48
+    Median: 58
+    Mean: 58.28
+    3rd Qu.: 67
+    Max.: 89
+    NA's: 1
     
 ```{r Exercise 2.2}
 summary(rna_se@colData$age_at_index)
@@ -171,7 +173,7 @@ Call *head()* on *rowRanges@elementMetadata*:
 
 ```{r Exercise 3.1}
 # write code here
-head()
+head(rna_se@rowRanges@elementMetadata)
 
 ```
 
@@ -185,19 +187,19 @@ rna_genes <- rna_se@rowRanges@elementMetadata
 Use the *as.data.frame()* function on *rna_genes* to change it from an S4 object to a data frame object.
 
 ```{r Exercise 3.3}
-rna_genes <- as.data.frame()
+rna_genes <- as.data.frame(rna_genes)
 
 ```
 
 ###### (4) Assays - RNA expression data
 
 What are the names of the 6 assays?
-1. 
-2.
-3.
-4. 
-5. 
-6. 
+1. unstranded
+2. stranded_first
+3. stranded_second
+4. tpm_unstrand
+5. fpkm_unstrand
+6. fpkm_uq_unstrand
 
 ```{r Exercise 4.1}
 # access the assays here
@@ -208,8 +210,9 @@ rna_se@assays@data
 Create a new data frame called "rna_counts" that contains the data from *unstranded*.
 ```{r Exercise 4.2}
 
-rna_counts <- rna_se@assays@data$[FILL IN]
-rna_counts <- as.data.frame('FILL IN')
+rna_counts <- rna_se@assays@data$unstranded
+rna_counts <- as.data.frame(rna_counts)
+
 
 ```
 
@@ -221,14 +224,15 @@ Notice how in this case, we apply the mask to the columns of the *rna_counts* da
 This is because the two data frames align in a unique way: the rows of *rna_clinical* match up with the columns of *rna_counts*. These are where the sample/patients are situated in either data frames.
 
 ```{r Exercise 4.3}
-rna_counts <- rna_counts[,age_NA_mask]
+
+rna_counts <- rna_counts[, age_NA_mask]
 
 ```
 
 Inspect the data for the first 5 patients (columns 1-5) and the first 15 genes (rows 1-15).
 
 ```{r Exercise 4.3}
-rna_counts[]
+rna_counts[1:15, 1:5]
 
 ```
 
@@ -238,7 +242,8 @@ rna_counts[]
 Call *rownames()* and *colnames()* on *rna_clinical*.
 
 ```{r Exercise 5.1}
-
+rownames(rna_clinical)
+colnames(rna_clinical)
 ```
 
 Just like we did to "clinical", we are going to create a column in *rna_clinical* named *age_category* to split apart younger and older patients. Our cutoff will be "young" as <= 58 y/o, and "old" as > 58 y/o.
@@ -258,7 +263,7 @@ Remember: ifelse(expression, x, y), where x happens if the expression is true, a
 Just like we did to "clinical", we are going to create a column in *rna_clinical* for *age_category*. Our cutoff will be "young" as <= 58 y/o, and "old" as > 58 y/o.
 
 ```{r Exercise 5.4}
-rna_clinical$age_category <- ifelse()
+rna_clinical$age_category <- ifelse(rna_clinical$age_at_index > 58, "old", "young")
 
 ```
 
@@ -267,6 +272,8 @@ rna_clinical$age_category <- ifelse()
 Let's move on to *rna_genes*. Call *rownames()* and *colnames()* on *rna_genes*.
 
 ```{r Exercise 5.5}
+rownames(rna_genes)
+colnames(rna_genes)
 
 ```
 
@@ -276,7 +283,7 @@ Oh no! These row names don't look very informative. We know that the rows in *rn
 
 rownames(rna_genes) <- rna_genes$gene_id
 
-rownames(rna_genes) <- rna_genes$gene_name
+#rownames(rna_genes) <- rna_genes$gene_name
 
 ```
 
@@ -287,14 +294,18 @@ Now that *rna_genes* has informative row/column names, let's move on to *rna_cou
 
 ```{r Exercise 5.7}
 
+rownames(rna_counts)
+colnames(rna_counts)
+
 ```
 
 Uh oh! Looks like neither the row nor column names are very informative. Given what we did to the other data frames, add column and row names to *rna_counts*. Name the columns based on the patient barcodes (ie the row names for *rna_clinical*), and name the rows based on the gene id's (ie the row names for *rna_genes*).
 
 ```{r Exercise 5.8}
 
-rownames(rna_counts) <- [FILL IN]
-colnames(rna_counts) <- [FILL IN]
+
+rownames(rna_counts) <- rownames(rna_genes)
+colnames(rna_counts) <- rownames(rna_clinical)
 
 ```
 
@@ -346,7 +357,7 @@ Once again, use the knitr function to set your working directory to your analysi
 (run getwd() in the console -- the small window below the main script area -- to check that the working directory is analysis_data)
 (if getwd() prints the wrong directory, run setwd("PATH TO anaylysis_data"))
 ```{r setup}
- knitr::opts_knit$set(root.dir = normalizePath("/PATH/TO/analysis_data"))
+ knitr::opts_knit$set(root.dir = normalizePath("/home1/mesciogl/490_cluster/analysis_data"))
 ```
 
 If DESeq2 is not already installed, install it now
@@ -362,7 +373,7 @@ Read in the rna_clinical, rna_genes, and rna_counts dataframes which you made in
 
 rna_clinical = read.csv("brca_rna_clinical_data.csv", row.names = 1)
 rna_genes = read.csv("brca_rna_gene_data.csv")
-rna_counts = read.csv("brca_rna_count_data.csv", row.names = 1)
+rna_counts = read.csv("brca_rna_count_data.csv", row.names = 1, check.names = FALSE)
 
 
 ```
@@ -373,6 +384,22 @@ In this assignment, you will run differential expression analysis comparing pati
 
 Manipulate those columns so that they are ready for differential expression analysis (hint: what kind of variables are they? what data type are they by default? do you need to handle unknown values?) Filter out genes with a total expression across all patients less than 1000.
 ```{r}
+keep <- rna_clinical$definition %in% c("Primary solid Tumor", "Solid Tissue Normal")
+rna_clinical_de <- rna_clinical[keep, ]
+
+rna_clinical_de <- rna_clinical_de[!is.na(rna_clinical_de$age_at_index), ]
+
+rna_clinical_de$definition <- factor(rna_clinical_de$definition,
+                                     levels = c("Solid Tissue Normal", "Primary solid Tumor"))
+
+rna_clinical_de$age_scaled <- as.numeric(scale(rna_clinical_de$age_at_index))
+
+# match counts to the filtered clinical samples (same order)
+rna_counts_de <- rna_counts[, rownames(rna_clinical_de)]
+
+
+# drop genes with total counts < 1000
+rna_counts_de <- rna_counts_de[rowSums(rna_counts_de) >= 1000, ]
 
 
 ```
@@ -383,21 +410,24 @@ Perform the differential expression analysis, All you need to do is fill in the 
 
 IMPORTANT: save the *results* data frame in your *analysis_data* directory using the last two commands in the chunk below. We will be using this for future assignments.
 ```{r}
-dds <- DESeqDataSetFromMatrix(countData = #fill in,
-                              colData = #fill in,
-                              design= #fill in)
+
+library(DESeq2)
+
+dds <- DESeqDataSetFromMatrix(countData = as.matrix(rna_counts_de),
+                              colData = rna_clinical_de,
+                              design= ~ age_scaled + definition)
 
 dds_obj <- DESeq(dds)
 
 resultsNames(dds_obj)
 
-results <- results(dds_obj, format = "DataFrame", contrast = c(#variable name, #numerator , #denominator))
+results <- results(dds_obj, format = "DataFrame", contrast = c("definition", "Primary solid Tumor", "Solid Tissue Normal"))
 
 results <- data.frame(results)
 
 ### save in .csv and .rds
 
-write.csv(results, "brca_DESeq_results.csv", row.names = T)
+write.csv(results, file = "brca_DESeq_results.csv", row.names = TRUE)
 # read in later using: results = read.csv("brca_DESeq_results.csv", row.names = 1)
 
 saveRDS(results, "brca_DESeq_results.rds")
@@ -407,11 +437,18 @@ saveRDS(results, "brca_DESeq_results.rds")
 Prepare results dataframe for EnhancedVolcano plotting. Add column "gene_name". Fill in the column appropriately.
 ```{r}
 
+results$gene_name <- rna_genes$gene_name[match(rownames(results), rna_genes$gene_id)]
+head(results)
 ```
 
 *4*
 Now we will use the EnhancedVolcano package to plot our results. The code is already completed and should run without adjustment if all code up to here is correct.
 ```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("EnhancedVolcano")
+library(EnhancedVolcano)
+
 EnhancedVolcano(results,
                 lab = results$gene_name,
                 x = 'log2FoldChange',
@@ -423,11 +460,11 @@ EnhancedVolcano(results,
 
 *5*
 # Explain what genes from each part of the Volcano Plot mean in terms of their significance and up/down regulation. 
-top-right genes: 
-bottom-right genes: 
-top-left genes: 
-bottom-left genes: 
-top-middle genes: 
-bottom-middle genes: 
+top-right genes: Genes that are statistically significantly upregulated in tumor cases.
+bottom-right genes: Genes that are non-statistically significantly upregulated in tumor cases.
+top-left genes: Genes that are statistically significantly downregulated in tumor cases.
+bottom-left genes: Genes that are non statistically significantly downregulated in tumor cases.
+top-middle genes: Genes that are statistically significant, but the fold change across tumor vs. control samples is so small that it is not biologically meaningful. 
+bottom-middle genes: Genes that are neither statistically significant nor meaningfully differentially expressed across tumor vs. control samples.
 
 Save the picture of the volcano plot (using either ggsave() or right clicking and manually downloading the image) and push this .Rmd file and the volcano plot to your personal GitHub repository.

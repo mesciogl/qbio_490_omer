@@ -7,7 +7,7 @@ updated: "10/25/26"
 
 ```{r setup}
 # Change to your directory
- knitr::opts_knit$set(root.dir = normalizePath("/home1/yourname/490_cluster/analysis_data/"))
+ knitr::opts_knit$set(root.dir = normalizePath("/home1/mesciogl/490_cluster/analysis_data/"))
 ```
 
 #Package Download and Data-cleaning
@@ -39,8 +39,23 @@ query <- GDCquery(project = "TCGA-BRCA",
                   data.type = "Methylation Beta Value",
                   platform = "Illumina Human Methylation 450",
                   data.format = "Dataframe")
-#GDCdownload(query)      <-- you will need to run this!
-methylation450 <- GDCprepare(query)
+
+for (i in 1:30) {
+  ok <- tryCatch({
+    GDCdownload(query, method = "api", files.per.chunk = 20)
+    TRUE
+  }, error = function(e) {
+    message("Attempt ", i, " failed: ", conditionMessage(e))
+    FALSE
+  })
+  if (ok) { message("Download complete!"); break }
+  Sys.sleep(60)  # wait 1 minute, then retry
+}
+
+#methylation450 <- GDCprepare(query)
+#saveRDS(methylation450, "methylation450.rds")
+   # later:
+methylation450 <- readRDS("methylation450.rds")
 ```
 The above data requires a LOT of memory. My recommendation: GDCdownload() and GDCprepare() in separate R sessions.
 R requires a lot of memory for both.
@@ -74,67 +89,98 @@ cpg_sites <- read.csv('brca_cpg_sites.csv', row.names = 1)
 
 # (1) Naive Differential Methylation
 ```{r}
-#masking out NAs
-na_mask <- !is.na(methylation_clinical$age_at_diagnosis)
-methylation_clinical <- methylation_clinical[na_mask,]
-betas_clean <- betas[,na_mask]
+# (1) Naive Differential Methylation
+library(limma)
 
-#creating our variable of interest & deciding the base group
-methylation_clinical$age_category <- ifelse(methylation_clinical$age_at_diagnosis >= 16425, "old", "young")
+# keep only metastatic and primary tumor samples
+keep <- methylation_clinical$definition %in% c("Metastatic", "Primary solid Tumor")
+methylation_clinical <- methylation_clinical[keep, ]
+betas_clean <- betas[, keep]
 
-#define your comparison and base group
-young_mask <- methylation_clinical$age_category == "young"
-methylation_clinical$old <- !young_mask #old is comparison, young is base
+# TRUE = metastatic (comparison), FALSE = non-metastatic (base)
+methylation_clinical$metastatic <- methylation_clinical$definition == "Metastatic"
+table(methylation_clinical$metastatic)
 
-#fitting linear models using a "target value"
-mval <- t(apply(betas_clean, 1, function(x) log2(x/(1-x)))) 
-#mvalue is another statistic for methylation, centered at 0 and ranges from -1 to 1
-#this step will take a few seconds to run
+mval <- t(apply(betas_clean, 1, function(x) log2(x / (1 - x))))
 
-design <- model.matrix(~ old, data = methylation_clinical)
+design <- model.matrix(~ metastatic, data = methylation_clinical)
 fit <- lmFit(mval, design)
 fit2 <- eBayes(fit)
 ```
 
 ```{r}
 # Extracting model into dataframe
-dat <- data.frame(foldchange = fit[["coefficients"]][,2], logPvalue =  -log10(p.adjust(fit2[["p.value"]][,2],method='BY')), geneName = cpg_sites$gene)
+# Extract model into a dataframe and make the volcano plot
+dat <- data.frame(foldchange = fit[["coefficients"]][, 2],
+                  logPvalue = -log10(p.adjust(fit2[["p.value"]][, 2], method = "BY")),
+                  geneName = cpg_sites$gene)
 dat$threshold <- as.factor(abs(dat$foldchange) < 1)
 
-# Visualization
 cols <- c("TRUE" = "grey", "FALSE" = "blue")
-ggplot(data=dat, aes(x=foldchange, y = logPvalue)) +
-  geom_point(alpha=.2, size=0.6) +
+ggplot(data = dat, aes(x = foldchange, y = logPvalue, colour = threshold)) +
+  geom_point(alpha = .2, size = 0.6) +
   scale_colour_manual(values = cols) +
-  geom_vline(xintercept = 1, colour="#990000", linetype="dashed") + 
-  geom_vline(xintercept = - 1, colour="#990000", linetype="dashed") +
-  geom_hline(yintercept = 2, colour = "#990000", linetype="dashed") +
-  theme(legend.position="none") +
-  xlab("Fold Change") +
-  ylab("-log10 p value") +
+  geom_vline(xintercept = 1, colour = "#990000", linetype = "dashed") +
+  geom_vline(xintercept = -1, colour = "#990000", linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), colour = "#990000", linetype = "dashed") +
+  xlab("Fold Change (metastatic vs non-metastatic)") +
+  ylab("-log10 adjusted p value") +
   theme_bw() +
   theme(legend.position = "none")
 
-# Saving results to a .csv file
-write.csv(dat, "methylation_results_age.csv")
+write.csv(dat, "methylation_results_metastatic.csv")
 ```
 
 #(2) Direct comparison of methylation status to transcriptional activity
 ...INSERT DESeq2 Stuff here to generate 'results'...
 ```{r}
-de_results <- read.csv("deSeq_results_age.csv")
+# (2) DESeq2: metastatic vs non-metastatic
+if (!require("DESeq2", quietly = TRUE))
+  BiocManager::install("DESeq2")
+library(DESeq2)
 
 rna_clinical <- read.csv("brca_rna_clinical_data.csv", row.names = 1)
 rna_genes <- read.csv("brca_rna_gene_data.csv")
 rna_counts <- read.csv("brca_rna_count_data.csv", row.names = 1)
+
+# same two groups as the methylation analysis
+keep_rna <- rna_clinical$definition %in% c("Metastatic", "Primary solid Tumor")
+rna_clinical <- rna_clinical[keep_rna, ]
+rna_counts <- rna_counts[, keep_rna]
+
+rna_clinical$met_status <- factor(ifelse(rna_clinical$definition == "Metastatic",
+                                         "metastatic", "non_metastatic"),
+                                  levels = c("non_metastatic", "metastatic"))  # non-metastatic = base
+table(rna_clinical$met_status)
+
+# filter genes with total expression < 20
+keep_genes <- rowSums(rna_counts) >= 20
+rna_counts <- rna_counts[keep_genes, ]
+rna_genes <- rna_genes[keep_genes, ]
+
+colnames(rna_counts) <- rownames(rna_clinical)
+
+dds <- DESeqDataSetFromMatrix(countData = round(as.matrix(rna_counts)),
+                              colData = rna_clinical,
+                              design = ~ met_status)
+dds_obj <- DESeq(dds)
+
+results <- data.frame(results(dds_obj, contrast = c("met_status", "metastatic", "non_metastatic")))
+results$gene_name <- rna_genes$gene_name
+results$gene_id <- rna_genes$gene_id
+write.csv(results, "deSeq_results_metastatic.csv", row.names = FALSE)
 ```
 
 
 ```{r}
-# Extract genes of interest
-downregulated <- de_results[(de_results$log2FoldChange < 1), 'gene_name']
-hypermethylated <- dat[dat$foldchange > 1.5, 'geneName'] #what cutoff should you use here?
+# Genes that are downregulated (RNA) AND hypermethylated in metastatic samples
+downregulated <- results[!is.na(results$padj) &
+                           results$padj < 0.05 &
+                           results$log2FoldChange < -1, "gene_name"]
+hypermethylated <- dat[dat$logPvalue > -log10(0.05) &
+                         dat$foldchange > 1, "geneName"]
 interest_genes <- intersect(downregulated, hypermethylated)
+interest_genes
 ```
 
 ```{r}
@@ -144,36 +190,40 @@ GENE<-"DNAH10"
 gene_counts_mask <- rna_genes$gene_name == GENE
 gene_betas_mask <- cpg_sites$gene == GENE
 
+# group masks: each one matches its own dataset's sample order
+rna_met <- rna_clinical$met_status == "metastatic"
+rna_nonmet <- rna_clinical$met_status == "non_metastatic"
+meth_met <- methylation_clinical$metastatic
+meth_nonmet <- !methylation_clinical$metastatic
+
+rna_metastatic <- as.numeric(rna_counts[gene_counts_mask, rna_met])
+rna_nonmetastatic <- as.numeric(rna_counts[gene_counts_mask, rna_nonmet])
+
+# use betas_clean so the columns match methylation_clinical
+methylation_metastatic <- betas_clean[gene_betas_mask, meth_met, drop = FALSE]
+methylation_nonmetastatic <- betas_clean[gene_betas_mask, meth_nonmet, drop = FALSE]
+
 #What are we doing here?
-rna_clinical_old <- rna_clinical$age_category == "old"
-methylation_clinical_old <- methylation_clinical$age_category == "old"
+# We are subsetting the epigenomic and transcriptomic datasets by age group masks created earlier.
 
-rna_clinical_young <- rna_clinical$age_category == "young"
-methylation_clinical_young <- methylation_clinical$age_category == "young"
-
-#What are we doing here?
-rna_old <- as.numeric(rna_counts[gene_counts_mask, rna_clinical_old])
-methylation_old <- (betas[gene_betas_mask, methylation_clinical_old])
-
-rna_young <- as.numeric(rna_counts[gene_counts_mask, rna_clinical_young])
-methylation_young <- (betas[gene_betas_mask, methylation_clinical_young])
 ```
 
 ```{r}
-# Show transcriptional differences
-boxplot(rna_young, rna_old, xlab='Group', ylab='Counts', names=c('young', 'old'),
-        col=c("blue","red"))
+# Transcriptional differences
+boxplot(rna_nonmetastatic, rna_metastatic,
+        names = c("Non-metastatic", "Metastatic"),
+        xlab = "Group", ylab = "Counts", main = paste(GENE, "expression"),
+        col = c("blue", "red"))
 ```
 
 ```{r}
 # Show methylation differences at CpG sites in this gene 
-plot(1:dim(methylation_young)[1], apply(methylation_young, 1, mean), col='blue', type='h', lwd=3, ylab='Average Beta', xlab='CpG sites')
-
-lines(1.3:(dim(methylation_old)[1]+0.3), apply(methylation_old, 1, mean), col='red', type='h', lwd=3)
-
-legend("topright",
-       legend=c("Young", "Old"),
-       col=c("blue", "red"),
-       lwd=3,
-       cex=0.7)
+# Methylation differences at each CpG site in this gene
+n_cpg <- nrow(methylation_nonmetastatic)
+plot(1:n_cpg, rowMeans(methylation_nonmetastatic), col = "blue", type = "h", lwd = 3,
+     ylim = c(0, 1), ylab = "Average Beta", xlab = "CpG sites",
+     main = paste(GENE, "methylation"))
+lines((1:n_cpg) + 0.3, rowMeans(methylation_metastatic), col = "red", type = "h", lwd = 3)
+legend("topright", legend = c("Non-metastatic", "Metastatic"),
+       col = c("blue", "red"), lwd = 3, cex = 0.7)
 ```

@@ -1,1 +1,89 @@
+### QBIO 490 Final Project ###
+
+# Genomics-Clinical: Andrew, Rian
+# Transcriptomics-Clinical: Ting Ting, Kathlyn
+# Genomics-Transcriptomics Bridge: Omer Mescioglu
+
+################################################## Pull clinical code: ###############################################################
+
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(maftools)
+library(dplyr)
+
+clin_query <- GDCquery(
+  project = "TCGA-GBM",
+  data.category = "Clinical",
+  data.type = "Clinical Supplement",
+  data.format = "BCR Biotab"
+)
+
+GDCdownload(clin_query)
+
+clinical.BCRtab.all <- GDCprepare(clin_query)
+
+# Extract patient-level clinical information
+clinic <- clinical.BCRtab.all$clinical_patient_gbm[-c(1,2),]
+
+# Inspect
+dim(clinic)
+colnames(clinic)
+head(clinic)
+
+############################################################ Pull genomic data: ######################################################
+
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(maftools)
+library(dplyr)
+
+mut_query <- GDCquery(
+  project = "TCGA-GBM",
+  data.category = "Simple Nucleotide Variation",
+  data.type = "Masked Somatic Mutation",
+  access = "open",
+  workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+
+GDCdownload(mut_query)
+
+genomic <- GDCprepare(mut_query)
+
+# Inspect
+dim(genomic)
+head(genomic)
+colnames(genomic)
+
+############################################################ Pull transcriptomic data: ######################################################
+
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(maftools)
+library(dplyr)
+
+rna_query <- GDCquery(
+  project = "TCGA-GBM",
+  data.category = "Transcriptome Profiling",
+  data.type = "Gene Expression Quantification",
+  workflow.type = "STAR - Counts"
+)
+
+GDCdownload(rna_query)
+
+transcriptomic <- GDCprepare(rna_query)
+
+# Inspect
+dim(transcriptomic)
+assayNames(transcriptomic)
+head(assay(transcriptomic))
+
+# Raw gene counts
+rna_counts <- assay(transcriptomic, "unstranded")
+
+# Gene annotations
+rna_genes <- as.data.frame(rowData(transcriptomic))
+
+# Sample information
+rna_samples <- as.data.frame(colData(transcriptomic))
+
 
